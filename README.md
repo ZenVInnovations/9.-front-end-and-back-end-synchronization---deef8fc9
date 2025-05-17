@@ -9,10 +9,11 @@ Converza is chat application built with the power of MERN Stack.
 - [Nodejs](https://nodejs.org/en/download)
 - [Mongodb](https://www.mongodb.com/docs/manual/administration/install-community/)
 
-B
+
 For Frontend.
 ```shell
 cd public
+yarn install
 yarn start
 ```
 For Backend.
@@ -20,6 +21,7 @@ For Backend.
 Open another terminal in folder, Also make sure mongodb is running in background.
 ```shell
 cd server
+yarn install
 yarn start
 ```
 Done! Now open localhost:3000 in your browser.
