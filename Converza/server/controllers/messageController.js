@@ -29,7 +29,7 @@ module.exports.getMessages = async (req, res, next) => {
       return {
         fromSelf: msg.sender.toString() === from,
         message: msg.message.text,
-        timestamp: msg.timestamp, // ✅ send to frontend
+        timestamp: msg.timestamp,
       };
     });
 
