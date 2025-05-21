@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Collaborative Whiteboard</title>
+    <style>
+        body { margin: 0; font-family: sans-serif; }
+        .controls { margin-bottom: 10px; padding: 10px; background-color: #f0f0f0; border-bottom: 1px solid #ccc; }
+        .color-swatches { display: inline-block; margin-right: 10px; }
+        .color-swatch {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            margin-right: 5px;
+            border: 1px solid #000;
+            cursor: pointer;
+        }
+        #colorPicker { margin-left: 10px; vertical-align: middle; }
+        label { margin-left: 10px; vertical-align: middle; }
+        #strokeWidth { vertical-align: middle; }
+        button { margin-left: 10px; padding: 8px 12px; cursor: pointer; }
+        canvas { display: block; border: 1px solid #ccc; }
+        #error-message { color: red; margin-top: 10px; }
+    </style>
+</head>
+<body>
+    <div class="controls">
+        <div class="color-swatches">
+            <div class="color-swatch" style="background-color: black;" data-color="black"></div>
+            <div class="color-swatch" style="background-color: red;" data-color="red"></div>
+            <div class="color-swatch" style="background-color: green;" data-color="green"></div>
+            <div class="color-swatch" style="background-color: blue;" data-color="blue"></div>
+        </div>
+        <input type="color" id="colorPicker" value="#000000">
+        <label for="strokeWidth">Stroke Width:</label>
+        <input type="range" id="strokeWidth" min="1" max="10" value="2">
+        <button id="drawButton">Draw</button>
+        <button id="rectButton">Rectangle</button>
+        <button id="eraserButton">Eraser</button>
+        <button id="clearButton">Clear</button>
+    </div>
+    <canvas id="whiteboard"></canvas>
+    <div id="error-message"></div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const canvas = document.getElementById('whiteboard');
+        const ctx = canvas.getContext('2d');
+        const socket = io();
+        const errorMessageDiv = document.getElementById('error-message');
+
+        const colorSwatches = document.querySelectorAll('.color-swatch');
+        const colorPicker = document.getElementById('colorPicker');
+        const strokeWidthInput = document.getElementById('strokeWidth');
+        const drawButton = document.getElementById('drawButton');
+        const rectButton = document.getElementById('rectButton');
+        const eraserButton = document.getElementById('eraserButton');
+        const clearButton = document.getElementById('clearButton');
+
+        let currentColor = 'black';
+        let currentStrokeWidth = 2;
+        let currentTool = 'draw';
+        let drawing = false;
+        let lastX = 0;
+        let lastY = 0;
+        let rectStartX, rectStartY;
+
+        canvas.width = window.innerWidth * 0.8;
+        canvas.height = window.innerHeight * 0.8;
+
+        colorSwatches.forEach(swatch => {
+            swatch.addEventListener('click', () => {
+                currentColor = swatch.dataset.color;
+            });
+        });
+
+        colorPicker.addEventListener('input', () => {
+            currentColor = colorPicker.value;
+        });
+
+        strokeWidthInput.addEventListener('input', () => {
+            currentStrokeWidth = parseInt(strokeWidthInput.value);
+        });
+
+        drawButton.addEventListener('click', () => {
+            currentTool = 'draw';
+        });
+
+        rectButton.addEventListener('click', () => {
+            currentTool = 'rect';
+        });
+
+        eraserButton.addEventListener('click', () => {
+            currentTool = 'eraser';
+        });
+
+        clearButton.addEventListener('click', () => {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            socket.emit('clear');
+        });
+
+        canvas.addEventListener('mousedown', (e) => {
+            drawing = true;
+            lastX = e.offsetX;
+            lastY = e.offsetY;
+            if (currentTool === 'rect') {
+                rectStartX = e.offsetX;
+                rectStartY = e.offsetY;
+            }
+        });
+
+        canvas.addEventListener('mousemove', (e) => {
+            if (!drawing) return;
+            if (currentTool === 'draw') {
+                draw(lastX, lastY, e.offsetX, e.offsetY, currentColor, currentStrokeWidth);
+                socket.emit('draw', { tool: 'draw', lastX, lastY, x: e.offsetX, y: e.offsetY, color: currentColor, strokeWidth: currentStrokeWidth });
+                lastX = e.offsetX;
+                lastY = e.offsetY;
+            } else if (currentTool === 'rect') {
+                // We'll draw the rectangle on mouseup to get the final dimensions
+            } else if (currentTool === 'eraser') {
+                erase(e.offsetX, e.offsetY, currentStrokeWidth * 2);
+                socket.emit('erase', { x: e.offsetX, y: e.offsetY, size: currentStrokeWidth * 2 });
+                lastX = e.offsetX;
+                lastY = e.offsetY;
+            }
+        });
+
+        canvas.addEventListener('mouseup', (e) => {
+            drawing = false;
+            if (currentTool === 'rect' && rectStartX !== undefined && rectStartY !== undefined) {
+                const width = e.offsetX - rectStartX;
+                const height = e.offsetY - rectStartY;
+                drawRect(rectStartX, rectStartY, width, height, currentColor, currentStrokeWidth);
+                socket.emit('draw', { tool: 'rect', x: rectStartX, y: rectStartY, width, height, color: currentColor, strokeWidth: currentStrokeWidth });
+                rectStartX = undefined;
+                rectStartY = undefined;
+            }
+        });
+
+        canvas.addEventListener('mouseout', () => {
+            drawing = false;
+        });
+
+        function draw(startX, startY, endX, endY, color, strokeWidth = 1) {
+            ctx.beginPath();
+            ctx.strokeStyle = color;
+            ctx.lineWidth = strokeWidth;
+            ctx.lineCap = 'round';
+            ctx.moveTo(startX, startY);
+            ctx.lineTo(endX, endY);
+            ctx.stroke();
+        }
+
+        function drawRect(x, y, width, height, color, strokeWidth = 1) {
+            ctx.strokeStyle = color;
+            ctx.lineWidth = strokeWidth;
+            ctx.strokeRect(x, y, width, height);
+        }
+
+        function erase(x, y, size) {
+            ctx.clearRect(x - size / 2, y - size / 2, size, size);
+        }
+
+        socket.on('draw', (data) => {
+            if (data.tool === 'draw') {
+                draw(data.lastX, data.lastY, data.x, data.y, data.color, data.strokeWidth);
+            } else if (data.tool === 'rect') {
+                drawRect(data.x, data.y, data.width, data.height, data.color, data.strokeWidth);
+            }
+        });
+
+        socket.on('erase', (data) => {
+            erase(data.x, data.y, data.size);
+        });
+
+        socket.on('clear', () => {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+        });
+
+        socket.on('connect_error', (error) => {
+            console.error('Connection Error:', error);
+            errorMessageDiv.textContent = `Connection Error: ${error}`;
+        });
+
+        socket.on('connect_timeout', (timeout) => {
+            console.error('Connection Timeout:', timeout);
+            errorMessageDiv.textContent = `Connection Timeout: ${timeout}`;
+        });
+
+        socket.on('disconnect', (reason) => {
+            console.log('Disconnected:', reason);
+            errorMessageDiv.textContent = `Disconnected: ${reason}`;
+        });
+
+        socket.io.on('reconnect', (attemptNumber) => {
+            console.log('Reconnected after attempt:', attemptNumber);
+            errorMessageDiv.textContent = ''; // Clear any error messages
+        });
+
+        socket.io.on('reconnect_attempt', (attemptNumber) => {
+            console.log('Attempting to reconnect...', attemptNumber);
+            errorMessageDiv.textContent = `Attempting to reconnect... (${attemptNumber})`;
+        });
+
+        socket.io.on('reconnect_error', (error) => {
+            console.error('Reconnection Error:', error);
+            errorMessageDiv.textContent = `Reconnection Error: ${error}`;
+        });
+
+        socket.io.on('reconnect_failed', () => {
+            console.error('Reconnection Failed');
+            errorMessageDiv.textContent = 'Reconnection Failed. Please refresh the page.';
+        });
+    </script>
+</body>
+</html>
